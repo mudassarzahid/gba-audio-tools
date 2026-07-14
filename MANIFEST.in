@@ -1,0 +1,6 @@
+include LICENSE
+include README.md
+recursive-include core *.c *.h
+recursive-include docs *.md
+recursive-include tests *.py *.md *.wbf
+recursive-include tools *.py

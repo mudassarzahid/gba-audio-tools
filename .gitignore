@@ -1,0 +1,37 @@
+# Game data
+*.gb
+*.gbc
+*.gba
+*.sgb
+*.rom
+*.sav
+*.pak
+*.wbf
+*.gbs
+*.spc
+*.gsf
+*.minigsf
+*.gsflib
+*.wav
+
+# Exception: generated homebrew fixtures
+!tests/fixtures/homebrew/**
+
+# Build output
+build/
+dist/
+*.so
+*.pyd
+*.dylib
+*.o
+*.a
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
