@@ -6,6 +6,7 @@ import os
 import struct
 import wave
 
+import pytest
 from test_pak import SEQ, _build_rom
 
 from gba_audio.cli import main as cli_main
@@ -61,8 +62,10 @@ def test_render_wbf_song(tmp_path):
         wbf = f.read()
 
     out = tmp_path / "song.wav"
-    sec = render_wbf_song(wbf, 0, str(out), loops=1)
-    assert sec > 0.1
+    res = render_wbf_song(wbf, 0, str(out), loops=1)
+    assert res.seconds > 0.1
+    # one pass ends at the loop point, so the render is that song length
+    assert res.song_sec == pytest.approx(res.seconds, abs=0.1)
 
     channels, rate, frames = _read_wav(str(out))
     assert (channels, rate) == (1, WBF_SAMPLE_RATE)

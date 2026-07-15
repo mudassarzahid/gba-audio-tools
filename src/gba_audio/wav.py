@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import array
 import wave
+from typing import NamedTuple
 
 from .native import (
     MP2K_SAMPLE_RATE,
@@ -19,6 +20,16 @@ from .native import (
 )
 
 _CHUNK = 2048  # frames per render call
+
+
+class WbfRender(NamedTuple):
+    """seconds: what was written. song_sec: one play-through, i.e. the time
+    of the first loop-point crossing — the length `gba-audio list` and the
+    web converter report. A render of N loops is that long plus N-1 more
+    passes of the loop body, so the two numbers differ by design."""
+
+    seconds: float
+    song_sec: float
 
 
 def _write_wav(path: str, pcm: bytes, channels: int, rate: int) -> None:
@@ -65,8 +76,8 @@ def render_wbf_song(
     loops: int = 1,
     max_seconds: int = 0,
     normalize: bool = True,
-) -> float:
-    """Render one .wbf song to a mono WAV; returns seconds written.
+) -> WbfRender:
+    """Render one .wbf song to a mono WAV.
 
     The format loops forever, so a render ends after `loops` passes of the
     song's loop point, or at `max_seconds` if nonzero (whichever first;
@@ -75,9 +86,12 @@ def render_wbf_song(
     cap = (max_seconds or 900) * WBF_SAMPLE_RATE
     chunks: list[bytes] = []
     total = 0
+    first_loop = 0
     while total < cap:
         chunks.append(r.render(_CHUNK))
         total += _CHUNK
+        if not first_loop and r.loops >= 1:
+            first_loop = total
         if not max_seconds and r.loops >= loops:
             break
 
@@ -90,4 +104,4 @@ def render_wbf_song(
             v = int(s * gain)
             samples[i] = 32767 if v > 32767 else (-32768 if v < -32768 else v)
     _write_wav(out_path, samples.tobytes(), 1, WBF_SAMPLE_RATE)
-    return total / WBF_SAMPLE_RATE
+    return WbfRender(total / WBF_SAMPLE_RATE, first_loop / WBF_SAMPLE_RATE)

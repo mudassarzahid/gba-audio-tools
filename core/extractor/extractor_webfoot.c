@@ -47,9 +47,10 @@ static int pattern_len(const uint8_t *rom, uint32_t pp, uint32_t flag_lut) {
 
 static uint32_t ro(uint32_t p) { return p - 0x08000000; }
 
-/* Per-song metadata for the converter UI: single-pass duration (ms), number
- * of channels that ever play a note, and whether the song loops (ends on a
- * backward fx2 jump). Timing mirrors the verified renderer: samples/tick =
+/* Per-song metadata for the converter UI: single-pass duration (ms) — the
+ * length of one play-through, which is what a player shows as the song's
+ * length — the number of channels that ever play a note, and whether the
+ * song repeats. Timing mirrors the verified renderer: samples/tick =
  * 40000/tempo at the driver's 2^24/1050 Hz clock, following fx1 (speed),
  * fx20 (tempo) and fx2 (jump) exactly. */
 static void wbf_song_info(Extractor *e, int idx, uint32_t *dur_ms,
@@ -118,6 +119,12 @@ static void wbf_song_info(Extractor *e, int idx, uint32_t *dur_ms,
         }
         opos++;
     }
+    /* The driver has no end marker: a song that runs off the end of its
+     * order list wraps to order 0 and plays again (webfoot.c), which the
+     * engine counts as a loop crossing exactly like an fx2 jump. So every
+     * song that survives the walk repeats — with an explicit loop point or
+     * from the top — and only a malformed one (guard tripped) does not. */
+    if (opos >= order_len) looped = 1;
 
     int cc = 0;
     for (int i = 0; i < 16; i++) if (chan_mask & (1u << i)) cc++;

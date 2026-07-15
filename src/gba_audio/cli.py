@@ -243,9 +243,16 @@ def cmd_wav(args) -> int:
                 fade_ms=args.fade,
                 max_seconds=args.seconds or 900,
             )
+            print(f"wrote {out} ({sec:.1f}s)")
         else:
-            sec = render_wbf_song(image, i, out, loops=max(1, args.loops), max_seconds=args.seconds)
-        print(f"wrote {out} ({sec:.1f}s)")
+            passes = max(1, args.loops)
+            res = render_wbf_song(image, i, out, loops=passes, max_seconds=args.seconds)
+            # Spell out the loop policy: the WAV is longer than the song
+            # length `list` (and the web converter) reports, because the
+            # render plays the song and then loops it.
+            n = f"{passes} pass" + ("es" if passes != 1 else "")
+            detail = f" = {n} of a {_mtime(res.song_sec).strip()} song" if res.song_sec else ""
+            print(f"wrote {out} ({res.seconds:.1f}s{detail})")
     return 0
 
 
@@ -288,7 +295,9 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=2,
         metavar="N",
-        help="stop after N loops (MP2K: then fade; Webfoot: loop-point passes; default 2)",
+        help="stop after N loops (MP2K: then fade; Webfoot: loop-point passes; "
+        "default 2, so a Webfoot WAV runs ~2x the song length `list` reports — "
+        "use --loops 1 for a single play-through)",
     )
     pw.add_argument(
         "--fade",

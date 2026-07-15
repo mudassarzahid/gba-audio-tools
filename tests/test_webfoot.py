@@ -93,7 +93,11 @@ def test_per_song_metadata():
     # 1 row at tempo 120 / speed 6: 6 * (40000/120) / (2**24/1050) s
     assert abs(s.duration_sec - 6 * (40000 / 120) / (2**24 / 1050)) < 1e-3
     assert s.channels == 1  # one channel plays a note
-    assert s.loops is False  # order list ends, no backward jump
+    # No backward jump, but the driver has no end marker either: the order
+    # list runs out and playback wraps to the top, which the engine counts as
+    # a loop crossing (webfoot.c). Every well-formed song therefore repeats,
+    # and duration_sec is the length of one play-through.
+    assert s.loops is True
 
 
 def test_build_wbf_roundtrip(tmp_path):
