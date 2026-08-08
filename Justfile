@@ -46,6 +46,12 @@ test:
 fixture:
     uv run python tools/make_wbf_fixture.py tests/fixtures/homebrew/chiptune.wbf
 
+# Hearing-test A/B for the MIDI export: engine WAV vs the exported .mid
+# through the macOS GM synth AND through the game's own SoundFont
+# (gba-audio sf2), chroma-cosine scored (see tools/midi_ab.py)
+midi-ab rom song out="":
+    uv run tools/midi_ab.py {{rom}} {{song}} --sf2 {{ if out != "" { "-o " + out } else { "" } }}
+
 # Delete build artifacts and caches.
 clean:
     rm -rf build dist src/*.egg-info .pytest_cache .ruff_cache

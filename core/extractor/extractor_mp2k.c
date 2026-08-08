@@ -50,6 +50,9 @@ typedef struct {
 
     bool in_full;              /* currently inside a full sub-bank walk */
     bool error;
+    uint8_t *voice_used;       /* when set, trace_track marks VOICE args here
+                                * (128 flags); catches running-status VOICEs
+                                * the caller's plain BD-xx byte scan misses */
 } Walk;
 
 static void walk_init(Walk *w, Extractor *e) {
@@ -199,6 +202,8 @@ static void trace_track(Walk *w, uint32_t start) {
                     for (int k = 1; k < n; k++) visited[pos + k] = 1;
                     pos += n;
                 } else if (last >= 0xBD && last <= 0xC8) {
+                    if (last == 0xBD && w->voice_used)
+                        w->voice_used[w->e->rom[pos]] = 1;
                     pos++;
                 } else {
                     pos++; break;
@@ -246,6 +251,8 @@ static void trace_track(Walk *w, uint32_t start) {
                 continue;
             }
             if (cmd >= 0xBA && cmd <= 0xC8 && cmd != 0xC6 && cmd != 0xC7) {
+                if (cmd == 0xBD && w->voice_used && w->e->rom[pos] < 0x80)
+                    w->voice_used[w->e->rom[pos]] = 1;
                 visited[pos++] = 1; continue;
             }
             if (cmd == 0xCD) {
@@ -413,11 +420,15 @@ static uint32_t mp2k_build(Extractor *e, const int *song_indices, int num_songs,
         uint8_t n_tracks = e->rom[song_pos];
         if (e->rom_size - song_pos < 8u + 4u * n_tracks) continue;
 
+        uint8_t used[128] = {0};
+        used[0] = 1;
         int c0 = w.n_chunks, p0 = w.n_ptr_sites;
         w.error = false;
         add_chunk(&w, song_pos, 8 + 4 * n_tracks);
         uint32_t bank = ptr(&w, song_pos + 4);
+        w.voice_used = used;       /* trace marks VOICE args, running status too */
         for (int i = 0; i < n_tracks; i++) trace_track(&w, ptr(&w, song_pos + 8 + 4 * i));
+        w.voice_used = NULL;
         if (w.error) {             /* bad pointer somewhere: drop this song */
             w.n_chunks = c0;
             w.n_ptr_sites = p0;
@@ -425,8 +436,6 @@ static uint32_t mp2k_build(Extractor *e, const int *song_indices, int num_songs,
             continue;
         }
 
-        uint8_t used[128] = {0};
-        used[0] = 1;
         for (int i = c0; i < w.n_chunks; i++) {
             for (uint32_t p = w.chunks[i].start; p < w.chunks[i].start + w.chunks[i].size - 1; p++) {
                 if (e->rom[p] == 0xBD && e->rom[p+1] < 0x80) { used[e->rom[p+1]] = 1; p++; }

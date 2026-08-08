@@ -141,3 +141,35 @@ def test_tracer_resumes_after_call_to_visited_pattern(tmp_path):
     assert blob[call + 7] == 0xB2
     goto_ptr = struct.unpack_from("<I", blob, call + 8)[0]
     assert goto_ptr == trk_off  # loops back to the pattern body
+
+
+def test_used_scan_catches_running_status_voice(tmp_path):
+    """A VOICE selected via running status (bare arg byte while the last
+    command is still 0xBD) must keep its voicegroup slot. The used[] scan
+    only matched literal BD-xx byte pairs, so such slots were zeroed and
+    the pak played that instrument silent (found via Emerald song 393,
+    slot 24)."""
+    rom = bytearray(_build_rom())
+    # voicegroup slot 1: a second DirectSound instrument, same sample
+    struct.pack_into(
+        "<BBBBII", rom, VOICEGROUP + 12, 0x00, 60, 0, 0, AGB_MAP_ROM + SAMPLE, 0x00FF00FF
+    )
+    # VOICE 0, delay, bare '1' = running-status VOICE 1, note, delay, FINE
+    seq = bytes([0xBD, 0x00, 0x84, 0x01, 0xE0, 60, 100, 0x84, 0xB1])
+    rom[SEQ : SEQ + len(seq)] = bytes(len(seq))  # clear the old sequence tail
+    rom[SEQ : SEQ + len(seq)] = seq
+    rom[SEQ + len(seq) : SEQ + 20] = bytes(20 - len(seq))
+
+    table = find_songtable(bytes(rom))
+    assert table is not None
+    out = tmp_path / "rs.pak"
+    build_pak(bytes(rom), table, [0], str(out))
+
+    d = out.read_bytes()
+    off, size, hdr, idx, ntr, _ = struct.unpack_from("<IIIHBB", d, 12)
+    blob = d[off : off + size]
+    vg_off = struct.unpack_from("<I", blob, hdr + 4)[0]
+    slot1 = blob[vg_off + 12 : vg_off + 24]
+    assert any(slot1), "running-status VOICE slot was zeroed out of the pak"
+    smp_off = struct.unpack_from("<I", slot1, 4)[0]
+    assert smp_off < size and blob[smp_off + 16] == MARKER

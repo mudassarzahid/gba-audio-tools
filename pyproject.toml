@@ -35,7 +35,7 @@ package-dir = { "" = "src" }
 packages = ["gba_audio"]
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.9", "ty>=0.0.1a1", "setuptools>=77"]
+dev = ["pytest>=8", "ruff>=0.9", "ty>=0.0.1a1", "setuptools>=77", "numpy>=1.24"]
 
 [tool.ruff]
 line-length = 100

@@ -4,15 +4,18 @@ gba-audio list game.gba
 gba-audio extract game.gba --songs music -o game.pak
 gba-audio wav game.gba --all -o outdir/
 gba-audio wav game.pak --song 3 -o song3.wav
+gba-audio midi game.gba -o outdir/
+gba-audio midi game.pak --song 3 -o song3.mid
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import struct
 import sys
 
-from .scanner import find_songtable
+from .scanner import AGB_MAP_ROM, find_songtable
 
 
 def no_songtable_message(name: str, data: bytes) -> str:
@@ -256,6 +259,161 @@ def cmd_wav(args) -> int:
     return 0
 
 
+_NO_MIDI_FOR_WEBFOOT = (
+    "MIDI export supports MP2K songs only. Webfoot songs are tracker "
+    "patterns driving PCM samples, with effects (portamento, vibrato, "
+    "tempo ramps) that have no faithful MIDI form; render them with "
+    "`gba-audio wav` instead."
+)
+
+
+def cmd_midi(args) -> int:
+    # Everything on this path is pure Python (scanner + midi): like `list`,
+    # MIDI export works without the C core. native is only imported to name
+    # a Webfoot ROM in the error message.
+    from .midi import PAK_MAGIC, pak_entry_count, pak_entry_index, pak_song_to_midi, song_to_midi
+
+    data = _load(args.input)
+    selected = (
+        [args.song]
+        if args.song is not None
+        else [int(x) for x in args.songs.split(",")]
+        if args.songs
+        else None
+    )
+
+    # jobs: (label for the file name, SMF bytes); .pak entries are addressed
+    # by entry number but named by original songtable index, as in cmd_wav.
+    jobs: list[tuple[int, bytes]] = []
+    if data[:8] == PAK_MAGIC:
+        entries = selected if selected is not None else list(range(pak_entry_count(data)))
+        for e in entries:
+            idx = pak_entry_index(data, e)
+            jobs.append((idx if idx >= 0 else e, pak_song_to_midi(data, e)))
+    elif data[:4] == b"WBF1":
+        print(_NO_MIDI_FOR_WEBFOOT, file=sys.stderr)
+        return 1
+    else:
+        table = find_songtable(data)
+        if table is None:
+            from .native import detect_webfoot
+
+            msg = (
+                _NO_MIDI_FOR_WEBFOOT
+                if detect_webfoot(data) is not None
+                else no_songtable_message(args.input, data)
+            )
+            print(msg, file=sys.stderr)
+            return 1
+        indices = selected if selected is not None else _music_indices(table, 0)
+        if not indices:
+            print("no songs classified as music", file=sys.stderr)
+            return 1
+        for i in indices:
+            if not 0 <= i < len(table.songs) or table.songs[i].n_tracks == 0:
+                print(f"skipping song {i}: empty or out of range", file=sys.stderr)
+                continue
+            jobs.append((i, song_to_midi(data, table.songs[i].song_pos)))
+
+    if not jobs:
+        print("nothing to convert", file=sys.stderr)
+        return 1
+    if len(jobs) == 1 and args.out and not os.path.isdir(args.out):
+        outs = [args.out]
+    else:
+        outdir = args.out or "."
+        os.makedirs(outdir, exist_ok=True)
+        outs = [os.path.join(outdir, f"song{n:03d}.mid") for n, _ in jobs]
+    for (_, smf), out in zip(jobs, outs, strict=True):
+        with open(out, "wb") as f:
+            f.write(smf)
+        print(f"wrote {out} ({len(smf)} bytes)")
+    return 0
+
+
+def cmd_sf2(args) -> int:
+    # Pure Python like cmd_midi; native is only for naming Webfoot ROMs.
+    from .midi import PAK_MAGIC, pak_entry_count, pak_entry_index, song_used_programs
+    from .sf2 import song_to_sf2
+
+    data = _load(args.input)
+    selected = (
+        [args.song]
+        if args.song is not None
+        else [int(x) for x in args.songs.split(",")]
+        if args.songs
+        else None
+    )
+
+    def build(blob: bytes, hdr_off: int, base: int, label: int) -> tuple[int, bytes] | None:
+        progs = song_used_programs(blob, hdr_off, base=base)
+        try:
+            sf2, skipped = song_to_sf2(blob, hdr_off, progs, base=base, name=f"song{label:03d}")
+        except ValueError as e:
+            print(f"skipping song {label}: {e}", file=sys.stderr)
+            return None
+        for note in skipped:
+            print(f"song {label}: {note}", file=sys.stderr)
+        return label, sf2
+
+    jobs: list[tuple[int, bytes]] = []
+    if data[:8] == PAK_MAGIC:
+        entries = selected if selected is not None else list(range(pak_entry_count(data)))
+        for e in entries:
+            if not 0 <= e < pak_entry_count(data):
+                print(f"skipping entry {e}: out of range", file=sys.stderr)
+                continue
+            off, size, hdr_off = struct.unpack_from("<III", data, 12 + e * 16)
+            if size == 0:
+                print(f"skipping entry {e}: dropped at extraction", file=sys.stderr)
+                continue
+            idx = pak_entry_index(data, e)
+            job = build(data[off : off + size], hdr_off, 0, idx if idx >= 0 else e)
+            if job:
+                jobs.append(job)
+    elif data[:4] == b"WBF1":
+        print(_NO_MIDI_FOR_WEBFOOT, file=sys.stderr)
+        return 1
+    else:
+        table = find_songtable(data)
+        if table is None:
+            from .native import detect_webfoot
+
+            msg = (
+                _NO_MIDI_FOR_WEBFOOT
+                if detect_webfoot(data) is not None
+                else no_songtable_message(args.input, data)
+            )
+            print(msg, file=sys.stderr)
+            return 1
+        indices = selected if selected is not None else _music_indices(table, 0)
+        if not indices:
+            print("no songs classified as music", file=sys.stderr)
+            return 1
+        for i in indices:
+            if not 0 <= i < len(table.songs) or table.songs[i].n_tracks == 0:
+                print(f"skipping song {i}: empty or out of range", file=sys.stderr)
+                continue
+            job = build(data, table.songs[i].song_pos, AGB_MAP_ROM, i)
+            if job:
+                jobs.append(job)
+
+    if not jobs:
+        print("nothing to convert", file=sys.stderr)
+        return 1
+    if len(jobs) == 1 and args.out and not os.path.isdir(args.out):
+        outs = [args.out]
+    else:
+        outdir = args.out or "."
+        os.makedirs(outdir, exist_ok=True)
+        outs = [os.path.join(outdir, f"song{n:03d}.sf2") for n, _ in jobs]
+    for (_, sf2), out in zip(jobs, outs, strict=True):
+        with open(out, "wb") as f:
+            f.write(sf2)
+        print(f"wrote {out} ({len(sf2)} bytes)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="gba-audio",
@@ -314,6 +472,36 @@ def main(argv: list[str] | None = None) -> int:
         help="hard length cap in seconds (0 = policy decides)",
     )
     pw.set_defaults(fn=cmd_wav)
+
+    pm = sub.add_parser(
+        "midi",
+        help="convert MP2K songs to standard MIDI files",
+        description="Convert MP2K sequences back to standard MIDI "
+        "(SMF format 1, one pass with loopStart/loopEnd markers). "
+        "Program numbers are the game's voicegroup indices, not "
+        "General MIDI, so expect odd sounds on a GM synth; the export "
+        "is meant for DAW/notation work. MP2K only: Webfoot data is "
+        "a PCM tracker format with no MIDI equivalent.",
+    )
+    pm.add_argument("input", help=".pak or GBA ROM (a game you legally own)")
+    pm.add_argument("--song", type=int, help="convert one song")
+    pm.add_argument("--songs", help="comma-separated song indices")
+    pm.add_argument("-o", "--out", help="output .mid (single song) or directory")
+    pm.set_defaults(fn=cmd_midi)
+
+    ps = sub.add_parser(
+        "sf2",
+        help="build a SoundFont (.sf2) of a song's instruments",
+        description="Build a SoundFont 2 bank from an MP2K song's "
+        "voicegroup: preset n = the song's program n, so the .sf2 loaded "
+        "next to the matching `gba-audio midi` export plays the notes "
+        "with the game's own samples. MP2K only.",
+    )
+    ps.add_argument("input", help=".pak or GBA ROM (a game you legally own)")
+    ps.add_argument("--song", type=int, help="build for one song")
+    ps.add_argument("--songs", help="comma-separated song indices")
+    ps.add_argument("-o", "--out", help="output .sf2 (single song) or directory")
+    ps.set_defaults(fn=cmd_sf2)
 
     args = p.parse_args(argv)
     return args.fn(args)

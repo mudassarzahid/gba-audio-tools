@@ -13,7 +13,12 @@ these two sound engines:
 The pipeline: scan a ROM, extract its songs into a self-contained image
 (`.pak` for MP2K, `.wbf` for Webfoot: sequences + instruments + samples,
 pointers relocated, no ROM needed afterwards), and render to WAV with C
-implementations of both engines.
+implementations of both engines. MP2K songs (compiled MIDI to begin with)
+can also be converted back to standard `.mid` files for DAW or notation
+work (pure Python, with the song's loop as `loopStart`/`loopEnd` markers)
+and `gba-audio sf2` builds the matching SoundFont from the song's
+voicegroup, so the MIDI plays with the game's own instruments instead of
+General MIDI guesses.
 
 Where it differs from [agbplay](https://github.com/ipatix/agbplay) (MP2K
 playback and GSF ripping) and
@@ -34,6 +39,8 @@ gba-audio list game.gba                      # songs, with music/jingle/sfx clas
 gba-audio extract game.gba -o game.pak       # every song classified as music
 gba-audio wav game.gba --all -o outdir/      # straight to WAV, one file per song
 gba-audio wav game.pak --song 3 -o song3.wav # from an extracted image
+gba-audio midi game.gba -o outdir/           # MP2K sequences back to .mid
+gba-audio sf2 game.gba --song 3 -o song3.sf2 # that song's instruments, as a SoundFont
 ```
 
 The same from Python. The scanner is pure Python, importable with no native
