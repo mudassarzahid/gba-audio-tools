@@ -210,7 +210,8 @@ static void apply_tick(WbfEngine *w, int ch) {
             else if (hi == 0 && lo)   { d = -lo; when = 1; }
             if ((when == 0 && t == 0) || (when == 1 && t >= 1)) {
                 int nv = w->work_vol[ch] + d;
-                if (nv < 0) nv = 0; if (nv > 0x40) nv = 0x40;
+                if (nv < 0) nv = 0;
+                if (nv > 0x40) nv = 0x40;
                 w->work_vol[ch] = nv;
                 if (v->active) v->vol = nv;
             }

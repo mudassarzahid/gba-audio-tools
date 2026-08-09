@@ -15,8 +15,26 @@ check: lint fmt-check typecheck build test
 lint: lint-c lint-py
 
 # Compile the core with warnings as errors; no output, just diagnostics.
-lint-c:
+lint-c: lint-c-cc lint-c-gcc
+
+lint-c-cc:
     cc -std=c99 -Wall -Wextra -Werror -Wno-unused-parameter -Icore -fsyntax-only {{CORE}}
+
+# Also compile with a real GCC when one is installed. CI builds on Linux/GCC,
+# which diagnoses things Apple clang does not (-Wmisleading-indentation among
+# them), so on macOS `cc` alone lets those through to a red CI run.
+lint-c-gcc:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for c in gcc-16 gcc-15 gcc-14 gcc-13 gcc; do
+        if command -v "$c" >/dev/null && ! "$c" --version 2>&1 | head -1 | grep -qi clang; then
+            echo "gcc lint: $c"
+            "$c" -std=c99 -Wall -Wextra -Werror -Wno-unused-parameter -Icore \
+                 -fsyntax-only {{CORE}}
+            exit 0
+        fi
+    done
+    echo "gcc lint: no non-clang gcc found, skipping (CI still checks)"
 
 # Static checks on the Python sources.
 lint-py:

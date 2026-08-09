@@ -67,7 +67,7 @@ distribute extracted `.pak`/`.wbf` files or renders of commercial music.
 
 ## Development
 
-```
+```shell
 git clone git@github.com:mudassarzahid/gba-audio-tools.git && cd gba-audio-tools
 just                                 # list the available tasks
 just check                           # lint + typecheck + build + test
