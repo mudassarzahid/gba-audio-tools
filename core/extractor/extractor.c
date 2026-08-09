@@ -52,3 +52,7 @@ uint32_t extractor_build(Extractor *e, const int *song_indices, int num_songs, u
     if (!e || !e->build_fn || !out_buffer) return 0;
     return e->build_fn(e, song_indices, num_songs, out_buffer);
 }
+
+void extractor_free_buffer(uint8_t *buffer) {
+    free(buffer);
+}

@@ -114,10 +114,11 @@ lib.extractor_build.argtypes = [
     ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)),
 ]
 lib.extractor_build.restype = ctypes.c_uint32
-
-# free() for the buffer extractor_build hands back (it malloc'd it)
-_libc = ctypes.CDLL(None)
-_libc.free.argtypes = [ctypes.c_void_p]
+# Release extractor_build's buffer through the core, not through libc: the
+# core may be linked against a different C runtime than this process (the
+# normal case on Windows), where freeing across that boundary is UB.
+lib.extractor_free_buffer.argtypes = [ctypes.POINTER(ctypes.c_uint8)]
+lib.extractor_free_buffer.restype = None
 
 # ---- MP2K player (core/mp2k/mp2k.h) ----------------------------------------
 
@@ -187,7 +188,7 @@ def extract_songs(rom: bytes, indices: list[int], table_pos: int = 0) -> tuple[b
         if size == 0:
             raise ValueError("Extractor build failed")
         out_bytes = ctypes.string_at(out_ptr, size)
-        _libc.free(ctypes.cast(out_ptr, ctypes.c_void_p))
+        lib.extractor_free_buffer(out_ptr)
         return out_bytes, fmt
     finally:
         lib.extractor_free(ext)

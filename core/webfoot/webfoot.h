@@ -26,24 +26,26 @@
 
 #include <stdint.h>
 
+#include "gba_export.h"
+
 #define WBF_SAMPLE_RATE 32768
 #define WBF_CHANNELS 15
 
 typedef struct WbfEngine WbfEngine;
 
 /* Opaque engine, caller-allocated via wbf_engine_size() or static. */
-unsigned wbf_engine_size(void);
+GBA_API unsigned wbf_engine_size(void);
 
 /* Validate the image and bind it. Returns NULL + *err on failure. */
-WbfEngine *wbf_open(void *mem, const void *data, long size, const char **err);
+GBA_API WbfEngine *wbf_open(void *mem, const void *data, long size, const char **err);
 
-int  wbf_song_count(const WbfEngine *w);
-void wbf_start(WbfEngine *w, int song);       /* select + reset */
+GBA_API int  wbf_song_count(const WbfEngine *w);
+GBA_API void wbf_start(WbfEngine *w, int song);       /* select + reset */
 
 /* Render n mono int16 samples at 32768 Hz. */
-void wbf_render(WbfEngine *w, int16_t *out, int n);
+GBA_API void wbf_render(WbfEngine *w, int16_t *out, int n);
 
 /* Number of times playback crossed the song's loop point. */
-int  wbf_loops(const WbfEngine *w);
+GBA_API int  wbf_loops(const WbfEngine *w);
 
 #endif

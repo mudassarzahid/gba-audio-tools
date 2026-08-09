@@ -1,5 +1,9 @@
 # gba-audio-tools
 
+[![CI](https://github.com/mudassarzahid/gba-audio-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/mudassarzahid/gba-audio-tools/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/gba-audio-tools)](https://pypi.org/project/gba-audio-tools/)
+[![Python](https://img.shields.io/pypi/pyversions/gba-audio-tools)](https://pypi.org/project/gba-audio-tools/)
+
 Extract and render music from Game Boy Advance ROMs that use either of
 these two sound engines:
 

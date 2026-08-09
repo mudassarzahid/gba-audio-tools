@@ -1,0 +1,58 @@
+# Builds wheels for every supported platform and publishes them to PyPI.
+#
+# Triggered by pushing a version tag:
+#
+#     git tag -a v0.1.0 -m 'v0.1.0' && git push origin v0.1.0
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  sdist:
+    name: sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build --sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-sdist
+          path: dist/*.tar.gz
+
+  wheels:
+    name: wheels ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-13 is the x86_64 runner, macos-latest is arm64; ubuntu-24.04-arm
+        # gives native aarch64 Linux wheels without QEMU.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-13, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      # Run cibuildwheel via pipx (preinstalled on the runners) rather than the
+      # action, so the version range lives in one place.
+      - run: pipx run --spec 'cibuildwheel>=2.19,<4' cibuildwheel --output-dir wheelhouse
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  publish:
+    name: publish to PyPI
+    needs: [sdist, wheels]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

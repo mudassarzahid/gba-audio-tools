@@ -34,6 +34,10 @@ setup(
             sources=SOURCES,
             include_dirs=["core"],
             libraries=["m"] if os.name == "posix" else [],
+            # Marks the public entry points __declspec(dllexport) so ctypes can
+            # find them in the DLL; expands to nothing off Windows. See
+            # core/gba_export.h.
+            define_macros=[("GBA_AUDIO_BUILD_SHARED", "1")],
         )
     ],
     cmdclass={"build_ext": BuildSharedLib},

@@ -28,6 +28,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "gba_export.h"
+
 #define MP2K_MAX_TRACKS 16
 #define MP2K_MAX_CHANNELS 16
 #define MP2K_CALL_STACK 3
@@ -48,20 +50,20 @@ typedef struct Mp2kPlayer Mp2kPlayer;
 
 /* Parse a .pak file. Returns number of songs, or -1 if not a valid pak.
  * For song i, fills cfg (blob/blob_size/hdr_off) from the pak index. */
-int mp2k_pak_songs(const uint8_t *pak, uint32_t pak_size);
-bool mp2k_pak_get(const uint8_t *pak, uint32_t pak_size, int song,
+GBA_API int mp2k_pak_songs(const uint8_t *pak, uint32_t pak_size);
+GBA_API bool mp2k_pak_get(const uint8_t *pak, uint32_t pak_size, int song,
                   Mp2kConfig *cfg);
 /* Original ROM songtable index of pak entry `song`, or -1. */
-int mp2k_pak_index(const uint8_t *pak, uint32_t pak_size, int song);
+GBA_API int mp2k_pak_index(const uint8_t *pak, uint32_t pak_size, int song);
 
-Mp2kPlayer *mp2k_new(const Mp2kConfig *cfg);
-void mp2k_delete(Mp2kPlayer *p);
+GBA_API Mp2kPlayer *mp2k_new(const Mp2kConfig *cfg);
+GBA_API void mp2k_delete(Mp2kPlayer *p);
 
 /* Render n interleaved stereo int16 samples. Returns false once the song
  * has ended: either FINE on all tracks with voices died out (one-shot), or
  * a looping song reached cfg.loop_count loops and its fade-out completed. */
-bool mp2k_render(Mp2kPlayer *p, int16_t *buf, int n);
+GBA_API bool mp2k_render(Mp2kPlayer *p, int16_t *buf, int n);
 
-int mp2k_n_tracks(const Mp2kPlayer *p);
+GBA_API int mp2k_n_tracks(const Mp2kPlayer *p);
 
 #endif

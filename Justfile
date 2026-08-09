@@ -52,6 +52,24 @@ fixture:
 midi-ab rom song out="":
     uv run tools/midi_ab.py {{rom}} {{song}} --sf2 {{ if out != "" { "-o " + out } else { "" } }}
 
+# Build the sdist + a wheel for this platform into dist/. The wheels that
+# ship to PyPI are built for every platform by .github/workflows/release.yml;
+# this is for checking the packaging locally.
+dist: clean
+    uv build
+
+# Install the built wheel into a throwaway venv and run the suite against it,
+# exactly as cibuildwheel does before publishing. Catches a wheel that cannot
+# load its bundled _native.
+dist-check: dist
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    uv venv "$tmp/venv" -q
+    uv pip install --python "$tmp/venv/bin/python" -q dist/*.whl pytest
+    (cd "$tmp" && "$tmp/venv/bin/python" -m pytest {{justfile_directory()}}/tests -q)
+
 # Delete build artifacts and caches.
 clean:
     rm -rf build dist src/*.egg-info .pytest_cache .ruff_cache
