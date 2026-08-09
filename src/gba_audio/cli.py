@@ -260,10 +260,12 @@ def cmd_wav(args) -> int:
 
 
 _NO_MIDI_FOR_WEBFOOT = (
-    "MIDI export supports MP2K songs only. Webfoot songs are tracker "
-    "patterns driving PCM samples, with effects (portamento, vibrato, "
-    "tempo ramps) that have no faithful MIDI form; render them with "
-    "`gba-audio wav` instead."
+    "MIDI export supports MP2K songs only. Most of the Webfoot sequencer "
+    "would survive the trip (notes, tempo, pan, volume slides), but sample "
+    "offset (fx15) has no MIDI equivalent at all and vibrato/portamento are "
+    "absolute period deltas rather than a synth-defined bend range, so an "
+    "export would drift from what the game plays. Render the audio with "
+    "`gba-audio wav`, or take the instruments with `gba-audio sf2`."
 )
 
 
@@ -331,6 +333,35 @@ def cmd_midi(args) -> int:
     return 0
 
 
+def _webfoot_sf2(wbf: bytes, args) -> int:
+    """Write the SoundFont for a .wbf's instrument table. Webfoot instruments
+    are shared ROM-wide rather than per-song, so this is one bank per game and
+    --song/--songs do not narrow it."""
+    from .sf2 import wbf_to_sf2
+
+    if args.song is not None or args.songs:
+        print(
+            "note: Webfoot instruments are shared by every song in the ROM, "
+            "so the whole bank is exported and --song/--songs are ignored.",
+            file=sys.stderr,
+        )
+    name = os.path.basename(args.input).rsplit(".", 1)[0]
+    try:
+        sf2, notes = wbf_to_sf2(wbf, name=name)
+    except ValueError as e:
+        print(f"sf2: {e}", file=sys.stderr)
+        return 1
+    for n in notes:
+        print(n, file=sys.stderr)
+    out = args.out or (args.input.rsplit(".", 1)[0] + ".sf2")
+    if out.endswith(os.sep) or os.path.isdir(out):
+        out = os.path.join(out, f"{name}.sf2")
+    with open(out, "wb") as f:
+        f.write(sf2)
+    print(f"wrote {out}: {len(sf2)} bytes")
+    return 0
+
+
 def cmd_sf2(args) -> int:
     # Pure Python like cmd_midi; native is only for naming Webfoot ROMs.
     from .midi import PAK_MAGIC, pak_entry_count, pak_entry_index, song_used_programs
@@ -372,20 +403,21 @@ def cmd_sf2(args) -> int:
             if job:
                 jobs.append(job)
     elif data[:4] == b"WBF1":
-        print(_NO_MIDI_FOR_WEBFOOT, file=sys.stderr)
-        return 1
+        return _webfoot_sf2(data, args)
     else:
         table = find_songtable(data)
         if table is None:
-            from .native import detect_webfoot
+            from .native import detect_webfoot, extract_songs
 
-            msg = (
-                _NO_MIDI_FOR_WEBFOOT
-                if detect_webfoot(data) is not None
-                else no_songtable_message(args.input, data)
-            )
-            print(msg, file=sys.stderr)
-            return 1
+            wf = detect_webfoot(data)
+            if wf is None:
+                print(no_songtable_message(args.input, data), file=sys.stderr)
+                return 1
+            # The instrument table is shared by every song, so extracting the
+            # whole ROM and exporting its bank is the same result as any
+            # single-song extraction, without needing a song selection.
+            wbf, _ = extract_songs(data, list(range(wf.n_songs)))
+            return _webfoot_sf2(wbf, args)
         indices = selected if selected is not None else _music_indices(table, 0)
         if not indices:
             print("no songs classified as music", file=sys.stderr)

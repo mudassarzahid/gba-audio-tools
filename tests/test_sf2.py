@@ -7,6 +7,7 @@ tests, a .pak built by the C extractor must produce the byte-identical
 SoundFont to the ROM it came from.
 """
 
+import os
 import struct
 
 from gba_audio.midi import song_used_programs
@@ -274,13 +275,108 @@ def test_cli_sf2(tmp_path):
     assert d[:4] == b"RIFF" and d[8:12] == b"sfbk"
 
 
-def test_cli_sf2_rejects_wbf(tmp_path, capsys):
+def test_cli_sf2_rejects_empty_wbf(tmp_path, capsys):
     from gba_audio.cli import main
 
     wbf = tmp_path / "songs.wbf"
-    wbf.write_bytes(b"WBF1" + bytes(64))
+    wbf.write_bytes(b"WBF1" + bytes(64))  # valid magic, no instrument table
     assert main(["sf2", str(wbf)]) == 1
-    assert "MP2K" in capsys.readouterr().err
+    assert "no instruments" in capsys.readouterr().err
+
+
+def test_wbf_sf2_rejects_bad_offsets():
+    import pytest
+
+    from gba_audio.sf2 import wbf_to_sf2
+
+    wbf = bytearray(_fixture_wbf())
+    struct.pack_into("<I", wbf, 0x14, len(wbf))  # instrument table past EOF
+    with pytest.raises(ValueError, match="offsets"):
+        wbf_to_sf2(bytes(wbf))
+
+
+# ---- Webfoot ----------------------------------------------------------------
+
+FIXTURE_WBF = os.path.join(os.path.dirname(__file__), "fixtures", "homebrew", "chiptune.wbf")
+
+
+def _fixture_wbf() -> bytes:
+    with open(FIXTURE_WBF, "rb") as f:
+        return f.read()
+
+
+def _wbf_inst_flags(wbf: bytes, slot: int) -> int:
+    off = struct.unpack_from("<I", wbf, 0x14)[0]
+    return wbf[off + slot * 12 + 4]
+
+
+def test_wbf_sf2_shape_and_loop_modes():
+    """The homebrew fixture has one looped and one one-shot instrument; each
+    becomes a preset whose sampleModes reflects its loop flag."""
+    from gba_audio.sf2 import wbf_to_sf2
+
+    wbf = _fixture_wbf()
+    sf2, _ = wbf_to_sf2(wbf)
+    _, shdr, instruments, presets = parse_sf2(sf2)
+
+    assert len(instruments) == 2 and len(presets) == 2
+    for slot, (_, zones) in enumerate(instruments):
+        looped = _wbf_inst_flags(wbf, slot) & 1
+        assert zones[0][54] == (1 if looped else 0)  # sampleModes
+        assert zones[0][43] == (0, 127)  # full keyrange
+    # base frequency becomes the sample rate, played at root key 60
+    assert all(s[5] == 16000 and s[6] == 60 for s in shdr[:2])
+
+
+def test_wbf_sf2_pcm_is_8bit_promoted_and_padded():
+    from gba_audio.sf2 import _SF2_MIN_SAMPLES, wbf_to_sf2
+
+    smpl, shdr, _, _ = parse_sf2(wbf_to_sf2(_fixture_wbf())[0])
+    for start, end in [(s[1], s[2]) for s in shdr[:2]]:
+        assert end - start >= _SF2_MIN_SAMPLES
+        vals = struct.unpack_from(f"<{end - start}h", smpl, start * 2)
+        # 8-bit source promoted by <<8: every value is a multiple of 256
+        assert all(v % 256 == 0 for v in vals)
+
+
+def test_wbf_sf2_pingpong_is_unrolled():
+    """SF2 has no bidirectional loop, so a ping-pong instrument must come out
+    as a longer sample with a forward loop over the doubled span."""
+    from gba_audio.sf2 import wbf_to_sf2
+
+    wbf = bytearray(_fixture_wbf())
+    off = struct.unpack_from("<I", wbf, 0x14)[0]
+    plain = parse_sf2(wbf_to_sf2(bytes(wbf))[0])[1][0]
+    wbf[off + 4] |= 0x02  # mark instrument 0 ping-pong
+    bounced, notes = wbf_to_sf2(bytes(wbf))
+    s = parse_sf2(bounced)[1][0]
+
+    assert (s[2] - s[1]) > (plain[2] - plain[1])  # sample grew
+    assert s[4] == s[2]  # loop end == sample end
+    assert any("ping-pong" in n for n in notes)
+
+
+def test_wbf_sf2_pad_keeps_loop_period():
+    from gba_audio.sf2 import _SF2_MIN_SAMPLES, _pad_to_sf2_minimum
+
+    pcm, loop = _pad_to_sf2_minimum([1, 2, 3, 4], (0, 4))
+    assert len(pcm) >= _SF2_MIN_SAMPLES
+    assert loop == (0, len(pcm))
+    assert pcm[:8] == [1, 2, 3, 4, 1, 2, 3, 4]  # period repeated, not silence
+    # a one-shot too short to loop is padded with silence instead
+    pcm, loop = _pad_to_sf2_minimum([5, 6], None)
+    assert loop is None and len(pcm) == _SF2_MIN_SAMPLES and pcm[2:] == [0] * 46
+
+
+def test_cli_sf2_webfoot_from_image(tmp_path):
+    from gba_audio.cli import main
+
+    src = tmp_path / "songs.wbf"
+    src.write_bytes(_fixture_wbf())
+    out = tmp_path / "bank.sf2"
+    assert main(["sf2", str(src), "-o", str(out)]) == 0
+    d = out.read_bytes()
+    assert d[:4] == b"RIFF" and d[8:12] == b"sfbk"
 
 
 def test_psg_exclusive_class_and_decay_to_sustain():

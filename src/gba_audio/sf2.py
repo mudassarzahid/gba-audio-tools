@@ -1,4 +1,9 @@
-"""Build a SoundFont 2 (.sf2) from an MP2K voicegroup.
+"""Build a SoundFont 2 (.sf2) from an MP2K voicegroup or a Webfoot bank.
+
+Two builders share one serialiser (`_Sf2Writer`). The MP2K one, documented
+below, is the involved one. The Webfoot one (`WebfootSoundFont`, at the
+bottom) is nearly trivial by comparison: its instruments are plain 8-bit
+PCM with a loop and a base frequency, no PSG and no envelopes.
 
 Companion to gba_audio.midi: the MIDI export writes program numbers that
 are the game's voicegroup slot indices, and this module builds the bank
@@ -129,7 +134,110 @@ class _Inst:
     zones: list[_Zone]
 
 
-class Mp2kSoundFont:
+class _Sf2Writer:
+    """SF2 serialisation, shared by the engine-specific builders below.
+
+    A subclass fills `samples` and `insts`; from there to the RIFF nothing is
+    engine-specific.
+    """
+
+    samples: list[_Sample]
+    insts: list[_Inst]
+
+    def tobytes(self, name: str = "gba-audio") -> bytes:
+        if not self.insts:
+            raise ValueError("no instruments to write")
+        smpl = bytearray()
+        shdr = bytearray()
+        starts: list[tuple[int, int]] = []
+        for s in self.samples:
+            start = len(smpl) // 2
+            smpl += struct.pack(f"<{len(s.pcm)}h", *(_clamp(v, -32768, 32767) for v in s.pcm))
+            smpl += bytes(46 * 2)  # required guard points
+            starts.append((start, start + len(s.pcm)))
+        for s, (start, end) in zip(self.samples, starts, strict=True):
+            ls, le = (start + s.loop[0], start + s.loop[1]) if s.loop else (start, end)
+            shdr += struct.pack(
+                "<20sIIIIIBbHH",
+                s.name.encode()[:20],
+                start,
+                end,
+                ls,
+                le,
+                s.rate,
+                s.root,
+                s.correction,
+                0,
+                1,  # mono sample
+            )
+        shdr += struct.pack("<20sIIIIIBbHH", b"EOS", 0, 0, 0, 0, 0, 0, 0, 0, 0)
+
+        # instruments: one global-less zone list; generator order per spec
+        inst = bytearray()
+        ibag = bytearray()
+        igen = bytearray()
+        phdr = bytearray()
+        pbag = bytearray()
+        pgen = bytearray()
+        for i, ins in enumerate(self.insts):
+            inst += struct.pack("<20sH", f"prog{ins.slot:03d}".encode(), len(ibag) // 4)
+            for z in ins.zones:
+                ibag += struct.pack("<HH", len(igen) // 4, 0)
+                igen += struct.pack("<HBB", _G_KEYRANGE, z.keylo, z.keyhi)
+                for gen, val in z.gens:
+                    igen += struct.pack("<Hh", gen, val)
+                igen += struct.pack("<HH", _G_SAMPLE_ID, z.sample)
+            phdr += struct.pack(
+                "<20sHHHIII", f"prog{ins.slot:03d}".encode(), ins.slot, 0, len(pbag) // 4, 0, 0, 0
+            )
+            pbag += struct.pack("<HH", len(pgen) // 4, 0)
+            pgen += struct.pack("<HH", _G_INSTRUMENT, i)
+        inst += struct.pack("<20sH", b"EOI", len(ibag) // 4)
+        ibag += struct.pack("<HH", len(igen) // 4, 0)
+        igen += struct.pack("<Hh", 0, 0)  # terminal
+        phdr += struct.pack("<20sHHHIII", b"EOP", 0, 0, len(pbag) // 4, 0, 0, 0)
+        pbag += struct.pack("<HH", len(pgen) // 4, 0)
+        pgen += struct.pack("<HH", 0, 0)
+        pmod = struct.pack("<HHhHH", 0, 0, 0, 0, 0)  # terminal only
+        imod = struct.pack("<HHhHH", 0, 0, 0, 0, 0)
+
+        def chunk(tag: bytes, payload: bytes) -> bytes:
+            return tag + struct.pack("<I", len(payload)) + payload + (b"\0" * (len(payload) & 1))
+
+        info = b"".join(
+            [
+                chunk(b"ifil", struct.pack("<HH", 2, 1)),
+                chunk(b"isng", b"EMU8000\0"),
+                chunk(b"INAM", name.encode()[:255] + b"\0"),
+                chunk(b"ISFT", b"gba-audio-tools\0"),
+            ]
+        )
+        pdta = b"".join(
+            [
+                chunk(b"phdr", bytes(phdr)),
+                chunk(b"pbag", bytes(pbag)),
+                chunk(b"pmod", pmod),
+                chunk(b"pgen", bytes(pgen)),
+                chunk(b"inst", bytes(inst)),
+                chunk(b"ibag", bytes(ibag)),
+                chunk(b"imod", imod),
+                chunk(b"igen", bytes(igen)),
+                chunk(b"shdr", bytes(shdr)),
+            ]
+        )
+        body = b"".join(
+            [
+                b"sfbk",
+                b"LIST" + struct.pack("<I", 4 + len(info)) + b"INFO" + info,
+                b"LIST" + struct.pack("<I", 4 + len(chunk(b"smpl", bytes(smpl)))),
+                b"sdta" + chunk(b"smpl", bytes(smpl)),
+                b"LIST" + struct.pack("<I", 4 + len(pdta)) + b"pdta" + pdta,
+            ]
+        )
+        return b"RIFF" + struct.pack("<I", len(body)) + body
+
+
+class Mp2kSoundFont(_Sf2Writer):
     """Extracts one voicegroup into SF2 samples/instruments/presets.
 
     `base` as in midi.py: AGB_MAP_ROM for a ROM, 0 for a .pak pool (the
@@ -474,99 +582,129 @@ class Mp2kSoundFont:
         self.insts.append(_Inst(slot, zones))
         return True
 
-    # ---- SF2 serialization -------------------------------------------------
 
-    def tobytes(self, name: str = "gba-audio") -> bytes:
-        if not self.insts:
-            raise ValueError("no instruments to write")
-        smpl = bytearray()
-        shdr = bytearray()
-        starts: list[tuple[int, int]] = []
-        for s in self.samples:
-            start = len(smpl) // 2
-            smpl += struct.pack(f"<{len(s.pcm)}h", *(_clamp(v, -32768, 32767) for v in s.pcm))
-            smpl += bytes(46 * 2)  # required guard points
-            starts.append((start, start + len(s.pcm)))
-        for s, (start, end) in zip(self.samples, starts, strict=True):
-            ls, le = (start + s.loop[0], start + s.loop[1]) if s.loop else (start, end)
-            shdr += struct.pack(
-                "<20sIIIIIBbHH",
-                s.name.encode()[:20],
-                start,
-                end,
-                ls,
-                le,
-                s.rate,
-                s.root,
-                s.correction,
-                0,
-                1,  # mono sample
+# ---- Webfoot ---------------------------------------------------------------
+
+_WBF_LOOPED = 0x01
+_WBF_PINGPONG = 0x02
+
+
+class WebfootSoundFont(_Sf2Writer):
+    """Builds an SF2 from a .wbf image's instrument table.
+
+    Far simpler than the MP2K path: a Webfoot instrument is one 8-bit signed
+    PCM sample plus a loop and a base frequency — no PSG, no compressed
+    formats, no envelope in the record (the driver ramps volume itself, which
+    SF2 cannot express and which is note-level rather than instrument-level
+    anyway). Pitch is exact: the driver plays note n at `base_freq *
+    2^((n-60)/12)`, which is what SF2 does for a sample whose sample rate is
+    the base frequency and whose root key is 60.
+
+    The instrument table is shared by every song in the ROM, so the whole
+    bank is exported at once; preset (bank 0, program n) is instrument n.
+    """
+
+    def __init__(self, wbf: bytes):
+        if wbf[:4] != b"WBF1":
+            raise ValueError("not a .wbf image")
+        self.data = wbf
+        self.samples: list[_Sample] = []
+        self.insts: list[_Inst] = []
+        self.notes: list[str] = []
+        self.n_insts = wbf[5]
+        self.off_insts = struct.unpack_from("<I", wbf, 0x14)[0]
+        if self.off_insts + self.n_insts * 12 > len(wbf):
+            raise ValueError("bad .wbf offsets")
+
+    def add_all(self) -> None:
+        n_ping = 0
+        for slot in range(self.n_insts):
+            rec = self.off_insts + slot * 12
+            smp_off, flags = struct.unpack_from("<IB", self.data, rec)
+            ls, le, base_hz = struct.unpack_from("<HHH", self.data, rec + 6)
+            # le doubles as the sample length: one-shots end there too.
+            if le == 0 or smp_off + le > len(self.data):
+                self.notes.append(f"instrument {slot}: sample out of range, skipped")
+                continue
+            if base_hz == 0:
+                self.notes.append(f"instrument {slot}: zero base frequency, skipped")
+                continue
+
+            pcm = [b << 8 for b in _signed8(self.data[smp_off : smp_off + le])]
+            loop: tuple[int, int] | None = None
+            if flags & _WBF_LOOPED and le > ls:
+                if flags & _WBF_PINGPONG:
+                    # SF2 has no bidirectional loop, so bake one bounce into
+                    # the sample and loop the doubled span forward. Endpoints
+                    # are dropped from the reversed half so the turnarounds
+                    # are not played twice.
+                    pcm = pcm + pcm[ls:le][-2:0:-1]
+                    n_ping += 1
+                loop = (ls, len(pcm) if flags & _WBF_PINGPONG else le)
+            pcm, loop = _pad_to_sf2_minimum(pcm, loop)
+
+            self.samples.append(
+                _Sample(
+                    name=f"wbf{slot:03d}",
+                    pcm=pcm,
+                    rate=base_hz,
+                    root=60,
+                    loop=loop,
+                )
             )
-        shdr += struct.pack("<20sIIIIIBbHH", b"EOS", 0, 0, 0, 0, 0, 0, 0, 0, 0)
-
-        # instruments: one global-less zone list; generator order per spec
-        inst = bytearray()
-        ibag = bytearray()
-        igen = bytearray()
-        phdr = bytearray()
-        pbag = bytearray()
-        pgen = bytearray()
-        for i, ins in enumerate(self.insts):
-            inst += struct.pack("<20sH", f"prog{ins.slot:03d}".encode(), len(ibag) // 4)
-            for z in ins.zones:
-                ibag += struct.pack("<HH", len(igen) // 4, 0)
-                igen += struct.pack("<HBB", _G_KEYRANGE, z.keylo, z.keyhi)
-                for gen, val in z.gens:
-                    igen += struct.pack("<Hh", gen, val)
-                igen += struct.pack("<HH", _G_SAMPLE_ID, z.sample)
-            phdr += struct.pack(
-                "<20sHHHIII", f"prog{ins.slot:03d}".encode(), ins.slot, 0, len(pbag) // 4, 0, 0, 0
+            self.insts.append(
+                _Inst(
+                    slot,
+                    [
+                        _Zone(
+                            0,
+                            127,
+                            len(self.samples) - 1,
+                            [(_G_SAMPLE_MODES, 1 if loop else 0)],
+                        )
+                    ],
+                )
             )
-            pbag += struct.pack("<HH", len(pgen) // 4, 0)
-            pgen += struct.pack("<HH", _G_INSTRUMENT, i)
-        inst += struct.pack("<20sH", b"EOI", len(ibag) // 4)
-        ibag += struct.pack("<HH", len(igen) // 4, 0)
-        igen += struct.pack("<Hh", 0, 0)  # terminal
-        phdr += struct.pack("<20sHHHIII", b"EOP", 0, 0, len(pbag) // 4, 0, 0, 0)
-        pbag += struct.pack("<HH", len(pgen) // 4, 0)
-        pgen += struct.pack("<HH", 0, 0)
-        pmod = struct.pack("<HHhHH", 0, 0, 0, 0, 0)  # terminal only
-        imod = struct.pack("<HHhHH", 0, 0, 0, 0, 0)
+        if n_ping:
+            self.notes.append(
+                f"{n_ping} ping-pong instrument(s) unrolled to a forward loop "
+                "(SF2 has no bidirectional mode)"
+            )
 
-        def chunk(tag: bytes, payload: bytes) -> bytes:
-            return tag + struct.pack("<I", len(payload)) + payload + (b"\0" * (len(payload) & 1))
 
-        info = b"".join(
-            [
-                chunk(b"ifil", struct.pack("<HH", 2, 1)),
-                chunk(b"isng", b"EMU8000\0"),
-                chunk(b"INAM", name.encode()[:255] + b"\0"),
-                chunk(b"ISFT", b"gba-audio-tools\0"),
-            ]
-        )
-        pdta = b"".join(
-            [
-                chunk(b"phdr", bytes(phdr)),
-                chunk(b"pbag", bytes(pbag)),
-                chunk(b"pmod", pmod),
-                chunk(b"pgen", bytes(pgen)),
-                chunk(b"inst", bytes(inst)),
-                chunk(b"ibag", bytes(ibag)),
-                chunk(b"imod", imod),
-                chunk(b"igen", bytes(igen)),
-                chunk(b"shdr", bytes(shdr)),
-            ]
-        )
-        body = b"".join(
-            [
-                b"sfbk",
-                b"LIST" + struct.pack("<I", 4 + len(info)) + b"INFO" + info,
-                b"LIST" + struct.pack("<I", 4 + len(chunk(b"smpl", bytes(smpl)))),
-                b"sdta" + chunk(b"smpl", bytes(smpl)),
-                b"LIST" + struct.pack("<I", 4 + len(pdta)) + b"pdta" + pdta,
-            ]
-        )
-        return b"RIFF" + struct.pack("<I", len(body)) + body
+def _signed8(raw: bytes) -> list[int]:
+    return [b - 256 if b > 127 else b for b in raw]
+
+
+#: SF2 2.01 requires a sample to hold at least 48 sample points.
+_SF2_MIN_SAMPLES = 48
+
+
+def _pad_to_sf2_minimum(
+    pcm: list[int], loop: tuple[int, int] | None
+) -> tuple[list[int], tuple[int, int] | None]:
+    """GBA wavetables run as short as 16 points, below the SF2 minimum, and
+    strict loaders reject those. Repeating a looped sample's period is
+    musically identical; a one-shot that short is inaudible either way, so it
+    is padded with silence."""
+    if len(pcm) >= _SF2_MIN_SAMPLES:
+        return pcm, loop
+    if loop:
+        start, end = loop
+        period = pcm[start:end]
+        if period:
+            while len(pcm) < _SF2_MIN_SAMPLES:
+                pcm = pcm + period
+            return pcm, (start, len(pcm))
+    return pcm + [0] * (_SF2_MIN_SAMPLES - len(pcm)), loop
+
+
+def wbf_to_sf2(wbf: bytes, *, name: str = "webfoot") -> tuple[bytes, list[str]]:
+    """Build the SoundFont for a .wbf image's whole instrument table.
+    Returns (sf2 bytes, list of notes about skipped/adapted instruments)."""
+    sf = WebfootSoundFont(wbf)
+    sf.add_all()
+    return sf.tobytes(name), sf.notes
 
 
 def song_to_sf2(
