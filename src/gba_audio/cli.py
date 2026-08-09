@@ -445,8 +445,14 @@ def main(argv: list[str] | None = None) -> int:
 
     pw = sub.add_parser("wav", help="render songs to WAV")
     pw.add_argument("input", help=".pak, .wbf, or GBA ROM")
-    pw.add_argument("--song", type=int, help="render one song")
-    pw.add_argument("--songs", help="comma-separated song indices")
+    sel = pw.add_mutually_exclusive_group()
+    sel.add_argument("--song", type=int, help="render one song")
+    sel.add_argument("--songs", help="comma-separated song indices")
+    sel.add_argument(
+        "--all",
+        action="store_true",
+        help="render every song (the default when no selection is given)",
+    )
     pw.add_argument("-o", "--out", help="output .wav (single song) or directory")
     pw.add_argument(
         "--loops",

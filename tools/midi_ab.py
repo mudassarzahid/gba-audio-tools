@@ -154,7 +154,7 @@ def main() -> int:
         print("  (matched notes score ~0.90+ on GM, higher with the game sf2;")
         print("   unrelated songs ~0.75-0.80; see --help)")
     else:
-        print("\nno macOS swift toolchain: synth render + score skipped; the .mid" )
+        print("\nno macOS swift toolchain: synth render + score skipped; the .mid")
         print("is written — render it with any synth and compare by ear.")
 
     print("\nlisten:")

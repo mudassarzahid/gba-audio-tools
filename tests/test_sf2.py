@@ -126,9 +126,7 @@ def _build_rom() -> bytes:
     # slot 1: PSG square 2 with 50% duty
     struct.pack_into("<BBBBII", rom, VOICEGROUP + 12, 0x02, 60, 0, 0, 2, _adsr(2, 1, 10, 3))
     # slot 2: drum bank
-    struct.pack_into(
-        "<BBBBII", rom, VOICEGROUP + 24, 0x80, 0, 0, 0, AGB_MAP_ROM + DRUMTABLE, 0
-    )
+    struct.pack_into("<BBBBII", rom, VOICEGROUP + 24, 0x80, 0, 0, 0, AGB_MAP_ROM + DRUMTABLE, 0)
     # slot 3: keysplit
     struct.pack_into(
         "<BBBBII",
@@ -195,8 +193,11 @@ def test_presets_match_slots():
 def test_pcm_sample_data_and_loop():
     smpl, shdr, instruments, _ = parse_sf2(_sf2())
     recs = {r[0].rstrip(b"\0").decode(): r for r in shdr[:-1]}
-    ramp = next(r for n, r in recs.items() if n.startswith("smp") and r[5] == SMP_RATE
-                and r[2] - r[1] == SMP_LEN)
+    ramp = next(
+        r
+        for n, r in recs.items()
+        if n.startswith("smp") and r[5] == SMP_RATE and r[2] - r[1] == SMP_LEN
+    )
     start, ls, le = ramp[1], ramp[3], ramp[4]
     assert (ls - start, le - start) == (SMP_LOOP, SMP_LEN)
     assert ramp[6] == 60  # root key

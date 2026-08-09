@@ -8,8 +8,8 @@ CORE := "core/extractor/extractor.c core/extractor/extractor_mp2k.c core/extract
 default:
     @just --list
 
-# Everything CI runs: lint, typecheck, build, test.
-check: lint typecheck build test
+# Everything CI runs: lint, format check, typecheck, build, test.
+check: lint fmt-check typecheck build test
 
 # Lint C (warnings as errors) and Python (ruff).
 lint: lint-c lint-py
