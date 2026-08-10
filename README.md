@@ -1,8 +1,8 @@
 # gba-audio-tools
 
 [![CI](https://github.com/mudassarzahid/gba-audio-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/mudassarzahid/gba-audio-tools/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/gba-audio-tools)](https://pypi.org/project/gba-audio-tools/)
-[![Python](https://img.shields.io/pypi/pyversions/gba-audio-tools)](https://pypi.org/project/gba-audio-tools/)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
+![License GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
 
 Extract and render music from Game Boy Advance ROMs that use either of
 these two sound engines:
@@ -38,8 +38,8 @@ signature. Extraction and rendering are verified on all six known Webfoot
 games (181 songs), with the renderer matching mGBA hardware emulation at 
 ≥ 0.99 chroma-cosine similarity on *Legacy of Goku II*.
 
-```
-pip install gba-audio-tools
+```shell
+pip install git+https://github.com/mudassarzahid/gba-audio-tools.git
 
 gba-audio list game.gba                      # songs, with music/jingle/sfx classification
 gba-audio extract game.gba -o game.pak       # every song classified as music
@@ -73,7 +73,7 @@ distribute extracted `.pak`/`.wbf` files or renders of commercial music.
 ```shell
 git clone git@github.com:mudassarzahid/gba-audio-tools.git && cd gba-audio-tools
 just                                 # list the available tasks
-just check                           # lint + typecheck + build + test
+just check                           # lint + format + typecheck + build + test
 uv run gba-audio list yourgame.gba   # run the CLI from the checkout
 ```
 
