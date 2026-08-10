@@ -5,42 +5,48 @@
 ![License GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
 
 Extract and render music from Game Boy Advance ROMs that use either of
-these two sound engines:
+these two sound drivers:
 
 - **MP2K / "Sappy" / m4a**: Nintendo's standard GBA driver, used by most
   commercial games (Pokémon, Fire Emblem, Golden Sun, ...).
-- **The Webfoot Technologies engine**: the sample-tracker driver used by
+- **The Webfoot Technologies driver**: a sample-tracker system used by
   *Dragon Ball Z: The Legacy of Goku II*, *Buu's Fury*, and others.
-  It was reverse-engineered for this project and is documented in
+  This project reverse-engineered it; see
   [docs/webfoot-format.md](docs/webfoot-format.md).
 
-The pipeline: scan a ROM, extract its songs into a self-contained image
-(`.pak` for MP2K, `.wbf` for Webfoot: sequences + instruments + samples,
-pointers relocated, no ROM needed afterwards), and render to WAV with C
-implementations of both engines. MP2K songs (compiled MIDI to begin with)
-can also be converted back to standard `.mid` files for DAW or notation
-work (pure Python, with the song's loop as `loopStart`/`loopEnd` markers)
-and `gba-audio sf2` builds the matching SoundFont from the song's
-voicegroup, so the MIDI plays with the game's own instruments instead of
-General MIDI guesses. `sf2` also works on Webfoot ROMs, where it exports
-the game's whole instrument bank as a playable SoundFont (there is no
-Webfoot MIDI export: `gba-audio midi` explains which effects block it).
+The pipeline runs in three steps:
 
-Where it differs from [agbplay](https://github.com/ipatix/agbplay) (MP2K
+1. **Scan** a ROM to find its songtable.
+2. **Extract** the songs into a self-contained image (`.pak` for MP2K,
+   `.wbf` for Webfoot: sequences, instruments, and samples, with pointers
+   relocated). The image needs no ROM afterward.
+3. **Render** the image to WAV with a C implementation of the matching
+   engine.
+
+MP2K songs start out as compiled MIDI, so `gba-audio midi` converts them
+back to standard `.mid` files for a DAW or notation program (pure Python;
+the song's loop becomes `loopStart`/`loopEnd` markers). `gba-audio sf2`
+builds a matching SoundFont from the same song's voicegroup, so the MIDI
+plays with the game's own instruments instead of a General MIDI guess.
+`sf2` also works on Webfoot ROMs: it exports the game's whole instrument
+bank as a playable SoundFont. Webfoot has no MIDI export — `gba-audio midi`
+reports which effects block it.
+
+This tool differs from [agbplay](https://github.com/ipatix/agbplay) (MP2K
 playback and GSF ripping) and
 [GBA Mus Ripper](https://github.com/CaptainSwag101/gba-mus-ripper) (MP2K to
-MIDI + SoundFont): it is a `pip`-installable Python library rather than only
-a CLI, and it classifies every songtable slot as *music / jingle / sfx* from
-an audio-free pass over the song bytecode, so you can pull a soundtrack
-without auditioning the sound-effect slots. For Webfoot games no other
-public tool works at all. The extractor finds every driver table by content
-signature. Extraction and rendering are verified on all six known Webfoot 
-games (181 songs), with the renderer matching mGBA hardware emulation at 
-≥ 0.99 chroma-cosine similarity on *Legacy of Goku II*.
+MIDI + SoundFont) in two ways. First, it is a `pip`-installable Python
+library, not only a CLI. Second, it classifies every songtable slot as
+*music*, *jingle*, or *sfx* from an audio-free pass over the song bytecode,
+so you can pull a soundtrack without auditioning the sound-effect slots.
+
+For Webfoot games, no other public tool exists. The extractor finds every
+driver table by content signature. Testing has verified extraction and
+rendering on all six known Webfoot games (181 songs). On *Legacy of Goku
+II*, the renderer matches mGBA hardware emulation at ≥ 0.99 chroma-cosine
+similarity.
 
 ```shell
-pip install git+https://github.com/mudassarzahid/gba-audio-tools.git
-
 gba-audio list game.gba                      # songs, with music/jingle/sfx classification
 gba-audio extract game.gba -o game.pak       # every song classified as music
 gba-audio wav game.gba --all -o outdir/      # straight to WAV, one file per song
@@ -65,8 +71,9 @@ for s in table.songs:
 ## Legal
 
 This tool reads ROMs of games **you own** and extracts data for personal
-use. It ships no game data. Test fixtures are synthesized from scratch. Don't
-distribute extracted `.pak`/`.wbf` files or renders of commercial music.
+use. It ships no game data; this repo synthesizes its test fixtures from
+scratch. Don't distribute extracted `.pak`/`.wbf` files or renders of
+commercial music.
 
 ## Development
 
@@ -78,9 +85,9 @@ uv run gba-audio list yourgame.gba   # run the CLI from the checkout
 ```
 
 Tasks run through [`just`](https://github.com/casey/just); each recipe is a
-one-liner over `uv` or `cc`. Python is linted with [ruff](https://docs.astral.sh/ruff/)
-and type-checked with [ty](https://docs.astral.sh/ty/); the C core is compiled
-under `-Wall -Wextra -Werror`.
+one-liner over `uv` or `cc`. [ruff](https://docs.astral.sh/ruff/) lints the
+Python code and [ty](https://docs.astral.sh/ty/) type-checks it; the build
+compiles the C core under `-Wall -Wextra -Werror`.
 
 The C core lives in `core/` (portable C99, GPL-3.0-or-later): the
 format-detecting extractor, the MP2K player (semantics follow

@@ -1,24 +1,27 @@
 # Webfoot sound-driver sequence format (Legacy of Goku II / Buu's Fury)
 
-Reverse-engineered from the Dragon Ball Z: The Legacy of Goku II PAL
-cartridge dump (header `DRAGONBALL Z`, code `ALFP`, Webfoot Technologies
-driver). No earlier sequence-level description of the engine is known.
-Named offsets below are **LoG II PAL**; a US (`ALFE`) build has the same 
-structures at different addresses. In this repo, `core/extractor/extractor_webfoot.c`
-locates every table by content signature (no per-game addresses) and 
-`core/webfoot/` plays the extracted data.
+This document reverse-engineers the format from the Dragon Ball Z: The
+Legacy of Goku II PAL cartridge dump (header `DRAGONBALL Z`, code `ALFP`,
+Webfoot Technologies driver). No earlier sequence-level description of the
+engine exists. Named offsets below are **LoG II PAL**; a US (`ALFE`) build
+has the same structures at different addresses. In this repo,
+`core/extractor/extractor_webfoot.c` locates every table by content
+signature, with no per-game addresses, and `core/webfoot/` plays the
+extracted data.
 
 The format carries over unchanged to **Buu's Fury** (`DBZBUUSFURY`,
-`BG3E`): the signatures are the equal-tempered note table
-(`0x200,0x21E,0x23F…`), the slide-factor LUTs, and the BGM table's
-structural invariant; stride-20 entries sharing one instrument-table and
-flag-LUT pointer. Buu's Fury: BGM table `0x3BB78C`, 53 songs, 79
-instruments @`0x36D18C`, note table `0x7B6724`; all songs parse with zero
-desync. Several tracks are shared between the two games.
+`BG3E`). The evidence: the same equal-tempered note table signature
+(`0x200, 0x21E, 0x23F…`), the same slide-factor LUTs, and the same BGM
+table structure — stride-20 entries that share one instrument-table
+pointer and one flag-LUT pointer.
+
+Buu's Fury specifics: BGM table at `0x3BB78C`, 53 songs, 79 instruments at
+`0x36D18C`, note table at `0x7B6724`. All songs parse with zero desync.
+The two games share several tracks.
 
 ## Games on this driver
 
-Signature detection, full extraction and rendering are verified on six
+Testing verifies signature detection, extraction, and rendering on six
 Webfoot GBA titles:
 
 | Game | Songs | Instruments |
@@ -30,14 +33,14 @@ Webfoot GBA titles:
 | My Little Pony: The Runaway Rainbow | 15 | 24 |
 | Tonka: On the Job | 17 | 40 |
 
-Playback accuracy is validated against mGBA on the two Legacy of Goku
+Testing validates playback accuracy against mGBA on the two Legacy of Goku
 titles.
 
 ## How it was found
 
 The in-game sound test (`Music Test: %d` string @`0x009978`) calls
 `PlayBGM` with a raw song index. Tracing it: the index scales by 20
-(`0x0837…` struct stride), indexing the **BGM table @`0x4047AC`** (44
+(`0x0837…` struct stride) to index the **BGM table @`0x4047AC`** (44
 entries). The driver code lives at `0x1F600–0x22200` (Thumb); the mixer
 streams 8-bit PCM to FIFO A/B via DMA1/2 timed by TM0 (`0x04000100`).
 Per-tick sequencer: `0x20DBC` (row advance), `0x20CD0` (row parser),
@@ -95,12 +98,16 @@ volume, and effect per channel and the note-on path fires on
     bit7 (0x80)  repeat last effect with stored param (dispatch mask 0x88)
 
 `flagLUT` for LoG II: `04 61 80 70 08 25 69 40 07 0f 34 2d e1 0c`. The
-selector scheme is pure size compression, the same note/vol/fx
-combinations recur, so common flag bytes are indexed instead of repeated.
+selector scheme is pure size compression: the same note/vol/fx
+combinations recur, so the format indexes common flag bytes instead of
+repeating them.
 
-Validation: all 44 songs parse with **zero** desync, every row's event
-stream terminates exactly on its `0x00`, every pattern consumes to its
-declared rowCount, every instrument index < 101, every note < 120.
+Validation: all 44 songs parse with **zero** desync.
+
+- Every row's event stream terminates exactly on its `0x00`.
+- Every pattern consumes to its declared rowCount.
+- Every instrument index is below 101.
+- Every note is below 120.
 
 ## Instrument table: `0x37A524`, 101 × 12 bytes
 
@@ -113,10 +120,11 @@ declared rowCount, every instrument index < 101, every note < 120.
 | +8  | u16  | loop end (= sample length for one-shots) |
 | +10 | u16  | base frequency (Hz; sample's natural pitch = note 60) |
 
-Samples are **8-bit signed PCM** (GBA DirectSound). 26 one-shot, 66
-forward-looped, 9 ping-pong (the long evolving pads/swells,
-forward-looping these by mistake injects a click of up to ~120/255 at every
-loop pass and audibly "restarts" the swell instead of bouncing it).
+Samples are **8-bit signed PCM** (GBA DirectSound): 26 one-shot, 66
+forward-looped, 9 ping-pong. The ping-pong samples are the long, evolving
+pads and swells. Forward-looping them by mistake injects a click of up to
+~120/255 at every loop pass and audibly "restarts" the swell instead of
+bouncing it.
 
 ## Pitch
 
@@ -130,9 +138,9 @@ factors).
 
 ## Effects
 
-Per-note effect handlers are dispatched through a jump table at `0x7D638C`
-(32 entries; every handler first runs the note-on path `0x202D0`, then its
-own logic). Verified semantics: the numbering is Webfoot's own, *not* the
+A jump table at `0x7D638C` dispatches per-note effect handlers (32
+entries); every handler first runs the note-on path (`0x202D0`), then its
+own logic. Verified semantics: the numbering is Webfoot's own, *not* the
 XM letter mapping:
 
     fx1  (0x20360)  set speed: player+3 = param (ticks/row, next row).
@@ -188,13 +196,14 @@ tracked with a /512 remainder accumulator, no drift).
 
 ## Validation
 
-All songs of both games parse with zero desync (see Pattern above). The
-renderer built from this description was validated against mGBA hardware
-emulation; an oracle independent of the reverse-engineering model, driven
-by a libmgba harness that boots the ROM and triggers each song: LoG II
-songs match the emulator at ≥0.99 chroma-cosine similarity, and the densest
-worst-case track (Buu's Fury song 34) at 0.976 with no isolatable channel
-error. Durations also line up with the circulating gamerip recordings to
+All songs of both games parse with zero desync (see Pattern above).
+
+mGBA hardware emulation validated the renderer built from this
+description. This oracle is independent of the reverse-engineering model:
+a libmgba harness boots the ROM and triggers each song. LoG II songs match
+the emulator at ≥0.99 chroma-cosine similarity; the densest worst-case
+track (Buu's Fury song 34) matches at 0.976, with no isolatable channel
+error. Durations also line up with the circulating gamerip recordings,
 within ~2 s on single-pass tracks.
 
 ---

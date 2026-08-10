@@ -1,5 +1,5 @@
 """gba-audio-tools: extract and render music from GBA ROMs, covering MP2K
-(Sappy) and the Webfoot Technologies engine (Legacy of Goku II / Buu's Fury).
+(Sappy) and the Webfoot Technologies driver (Legacy of Goku II / Buu's Fury).
 
 Pure-Python MP2K songtable scanning lives in gba_audio.scanner (importable
 without a C toolchain); extraction and rendering load the C core on first
